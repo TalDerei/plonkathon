@@ -11,7 +11,6 @@ from poly import Polynomial, Basis
 SETUP_FILE_G1_STARTPOS = 80
 SETUP_FILE_POWERS_POS = 60
 
-
 @dataclass
 class Setup(object):
     #   ([1]₁, [x]₁, ..., [x^{d-1}]₁)
@@ -60,18 +59,38 @@ class Setup(object):
         print("Extracted G2 side, X^1 point: {}".format(X2))
         # assert b.pairing(b.G2, powers_of_x[1]) == b.pairing(X2, b.G1)
         # print("X^1 points checked consistent")
-        return cls(powers_of_x, X2)
+        return cls(powers_of_x, X2) # type: ignore
 
     # Encodes the KZG commitment that evaluates to the given values in the group
     def commit(self, values: Polynomial) -> G1Point:
-        assert values.basis == Basis.LAGRANGE
-
         # Run inverse FFT to convert values from Lagrange basis to monomial basis
         # Optional: Check values size does not exceed maximum power setup can handle
         # Compute linear combination of setup with values
-        return NotImplemented
+        assert values.basis == Basis.LAGRANGE
+        assert len(values.values) <= len(self.powers_of_x)
+        poly_coeff_in_rou = values.ifft()        
+        # Powers of tau is sliced to ensure it matches the polynoial coefficients
+        kzg_commitment = ec_lincomb(list(zip(self.powers_of_x[: len(values.values)], poly_coeff_in_rou.values)))
+        
+        return kzg_commitment
 
     # Generate the verification key for this program with the given setup
     def verification_key(self, pk: CommonPreprocessedInput) -> VerificationKey:
-        # Create the appropriate VerificationKey object
-        return NotImplemented
+        # Create the appropriate VerificationKey object, which contains
+        # commitments to selector and permutation polynomials, G2 element
+        # from SRS, and nth root of unity        
+        vk_key = VerificationKey(
+            group_order=pk.group_order,
+            Qm=self.commit(pk.QM),
+            Ql=self.commit(pk.QL),
+            Qr=self.commit(pk.QR),
+            Qo=self.commit(pk.QO),
+            Qc=self.commit(pk.QC),
+            S1=self.commit(pk.S1),
+            S2=self.commit(pk.S2),
+            S3=self.commit(pk.S3),
+            X_2=self.X2,
+            w=Scalar.root_of_unity(pk.group_order)
+        )
+    
+        return vk_key

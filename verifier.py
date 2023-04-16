@@ -1,4 +1,4 @@
-import py_ecc.bn128 as b
+# import py_ecc.bn128 as b
 from utils import *
 from dataclasses import dataclass
 from curve import *
