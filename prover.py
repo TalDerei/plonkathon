@@ -65,7 +65,7 @@ class Prover:
         # Round 1
         msg_1 = self.round_1(witness)
         self.beta, self.gamma = transcript.round_1(msg_1)
-
+        
         # Round 2
         msg_2 = self.round_2()
         self.alpha, self.fft_cofactor = transcript.round_2(msg_2)
@@ -87,24 +87,36 @@ class Prover:
         self,
         witness: dict[Optional[str], int],
     ) -> Message1:
-        program = self.program
-        setup = self.setup
-        group_order = self.group_order
-
         if None not in witness:
             witness[None] = 0
-
+            
         # Compute wire assignments for A, B, C, corresponding:
         # - A_values: witness[program.wires()[i].L]
         # - B_values: witness[program.wires()[i].R]
         # - C_values: witness[program.wires()[i].O]
+        # A_values = witness[program.wires()[i].L]
+        A_values = [Scalar(0) for _ in range(self.group_order)]
+        B_values = [Scalar(0) for _ in range(self.group_order)]
+        C_values = [Scalar(0) for _ in range(self.group_order)]
+                
+        for i, gates in enumerate(self.program.wires()):
+            A_values[i] = Scalar(witness[gates.L])
+            B_values[i] = Scalar(witness[gates.R])
+            C_values[i] = Scalar(witness[gates.O])
 
         # Construct A, B, C Lagrange interpolation polynomials for
         # A_values, B_values, C_values
-
+        self.A = Polynomial(A_values, Basis.LAGRANGE)
+        self.B = Polynomial(B_values, Basis.LAGRANGE)
+        self.C = Polynomial(C_values, Basis.LAGRANGE)
+                
         # Compute a_1, b_1, c_1 commitments to A, B, C polynomials
+        a_1 = self.setup.commit(self.A)        
+        b_1 = self.setup.commit(self.B)        
+        c_1 = self.setup.commit(self.C)   
 
         # Sanity check that witness fulfils gate constraints
+        # Assert == [0, 0, 0, 0, 0, 0, 0, 0]
         assert (
             self.A * self.pk.QL
             + self.B * self.pk.QR
@@ -112,8 +124,10 @@ class Prover:
             + self.C * self.pk.QO
             + self.PI
             + self.pk.QC
-            == Polynomial([Scalar(0)] * group_order, Basis.LAGRANGE)
+            == Polynomial([Scalar(0)] * self.group_order, Basis.LAGRANGE)
         )
+        
+        print("Successfully completed round 1")
 
         # Return a_1, b_1, c_1
         return Message1(a_1, b_1, c_1)
