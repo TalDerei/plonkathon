@@ -69,6 +69,8 @@ class Prover:
         # Round 2
         msg_2 = self.round_2()
         self.alpha, self.fft_cofactor = transcript.round_2(msg_2)
+        
+        exit(0)
 
         # Round 3
         msg_3 = self.round_3()
@@ -103,13 +105,13 @@ class Prover:
             A_values[i] = Scalar(witness[gates.L])
             B_values[i] = Scalar(witness[gates.R])
             C_values[i] = Scalar(witness[gates.O])
-
+            
         # Construct A, B, C Lagrange interpolation polynomials for
         # A_values, B_values, C_values
         self.A = Polynomial(A_values, Basis.LAGRANGE)
         self.B = Polynomial(B_values, Basis.LAGRANGE)
         self.C = Polynomial(C_values, Basis.LAGRANGE)
-                
+                        
         # Compute a_1, b_1, c_1 commitments to A, B, C polynomials
         a_1 = self.setup.commit(self.A)        
         b_1 = self.setup.commit(self.B)        
@@ -126,7 +128,7 @@ class Prover:
             + self.pk.QC
             == Polynomial([Scalar(0)] * self.group_order, Basis.LAGRANGE)
         )
-        
+                
         print("Successfully completed round 1")
 
         # Return a_1, b_1, c_1
@@ -141,10 +143,26 @@ class Prover:
         #
         # Note the convenience function:
         #       self.rlc(val1, val2) = val_1 + self.beta * val_2 + gamma
-
+        
+        # Retrieve roots of unity
+        roots_of_unity = Scalar.roots_of_unity(self.group_order)
+        print(roots_of_unity)
+        
+        # Iteratively accumulate the grand product argument (permutation check
+        # passes if grand product == 1)          
+        Z_values = []
+        Z_values.append(Scalar(1))
+        for idx, i in enumerate(range(group_order), 1):
+            Z_values.append(Scalar(Z_values[idx - 1] * ((self.rlc(self.A.values[i], roots_of_unity[i]) 
+                * self.rlc(self.B.values[i], 2 * roots_of_unity[i])
+                * self.rlc(self.C.values[i], 3 * roots_of_unity[i])) /
+                (self.rlc(self.A.values[i], self.pk.S1.values[i]) 
+                * self.rlc(self.B.values[i], self.pk.S2.values[i])
+                * self.rlc(self.C.values[i], self.pk.S3.values[i])))))
+                    
         # Check that the last term Z_n = 1
         assert Z_values.pop() == 1
-
+        
         # Sanity-check that Z was computed correctly
         for i in range(group_order):
             assert (
@@ -160,8 +178,10 @@ class Prover:
             ] == 0
 
         # Construct Z, Lagrange interpolation polynomial for Z_values
-        # Cpmpute z_1 commitment to Z polynomial
-
+        # Compute z_1 commitment to Z polynomial
+        Z = Polynomial(Z_values, Basis.LAGRANGE)
+        z_1 = self.setup.commit(Z)   
+                        
         # Return z_1
         return Message2(z_1)
 
