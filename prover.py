@@ -74,11 +74,11 @@ class Prover:
         msg_3 = self.round_3()
         self.zeta = transcript.round_3(msg_3)
         
-        exit(0)
-
         # Round 4
         msg_4 = self.round_4()
         self.v = transcript.round_4(msg_4)
+
+        exit(0)
 
         # Round 5
         msg_5 = self.round_5()
@@ -321,18 +321,31 @@ class Prover:
         # Return t_lo_1, t_mid_1, t_hi_1
         return Message3(t_lo_1, t_mid_1, t_hi_1)
 
-    # def round_4(self) -> Message4:
-    #     # Compute evaluations to be used in constructing the linearization polynomial.
+    def round_4(self) -> Message4:
+        # Compute evaluations to be used in constructing the linearization polynomial.
 
-    #     # Compute a_eval = A(zeta)
-    #     # Compute b_eval = B(zeta)
-    #     # Compute c_eval = C(zeta)
-    #     # Compute s1_eval = pk.S1(zeta)
-    #     # Compute s2_eval = pk.S2(zeta)
-    #     # Compute z_shifted_eval = Z(zeta * ω)
+        # Compute a_eval = A(zeta)
+        self.a_eval = self.A.barycentric_eval(self.zeta)
+        
+        # Compute b_eval = B(zeta)
+        self.b_eval = self.B.barycentric_eval(self.zeta)
+        
+        # Compute c_eval = C(zeta)
+        self.c_eval = self.C.barycentric_eval(self.zeta)
+        
+        # Compute s1_eval = pk.S1(zeta)
+        self.s1_eval = self.pk.S1.barycentric_eval(self.zeta)
+        
+        # Compute s2_eval = pk.S2(zeta)
+        self.s2_eval = self.pk.S2.barycentric_eval(self.zeta)
+        
+        # Compute z_shifted_eval = Z(zeta * ω)
+        self.z_shifted_eval = self.Z.barycentric_eval(self.zeta * primitive_root)
+        
+        print("Successfully completed round 4")
 
-    #     # Return a_eval, b_eval, c_eval, s1_eval, s2_eval, z_shifted_eval
-    #     return Message4(a_eval, b_eval, c_eval, s1_eval, s2_eval, z_shifted_eval)
+        # Return a_eval, b_eval, c_eval, s1_eval, s2_eval, z_shifted_eval
+        return Message4(self.a_eval, self.b_eval, self.c_eval, self.s1_eval, self.s2_eval, self.z_shifted_eval)
 
     # def round_5(self) -> Message5:
     #     # Evaluate the Lagrange basis polynomial L0 at zeta
