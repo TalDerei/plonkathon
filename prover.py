@@ -78,8 +78,6 @@ class Prover:
         msg_4 = self.round_4()
         self.v = transcript.round_4(msg_4)
 
-        exit(0)
-
         # Round 5
         msg_5 = self.round_5()
 
@@ -242,14 +240,15 @@ class Prover:
 
         # Compute L0, the Lagrange basis polynomial that evaluates to 1 at x = 1 = ω^0
         # and 0 at other roots of unity. Expand L0 into the coset extended Lagrange basis
-        self.L0_expanded = self.fft_expand(Polynomial([Scalar(1)] + [Scalar(0)] * (self.group_order - 1), Basis.LAGRANGE))
+        self.L0 = Polynomial([Scalar(1)] + [Scalar(0)] * (self.group_order - 1), Basis.LAGRANGE)
+        self.L0_expanded = self.fft_expand(self.L0)
         
         # Compute the quotient polynomial (called T(x) in the paper)
         # It is only possible to construct this polynomial if the following
         # equations are true at all roots of unity {1, w ... w^(n-1)}:
         # 1. All gates are correct:
         #    A * QL + B * QR + A * B * QM + C * QO + PI + QC = 0
-        self.gate = (
+        self.gates = (
             (self.A_expanded * self.QL_expanded
             + self.B_expanded * self.QR_expanded
             + self.A_expanded * self.B_expanded * self.QM_expanded
@@ -264,7 +263,7 @@ class Prover:
         #                   (rlc of B, S2, 1) / (rlc of C, S3, 1)
         #    rlc = random linear combination: term_1 + beta * term2 + gamma * term3
         self.roots_of_unity_polynomial = Polynomial(self.roots_of_unity, Basis.LAGRANGE)
-        self.accumulator = ((
+        self.permutation_grand_product = ((
             (self.rlc(self.A_expanded, self.roots_of_unity_polynomial * self.fft_cofactor)
             * self.rlc(self.B_expanded, self.roots_of_unity_polynomial * (2 * self.fft_cofactor))
             * self.rlc(self.C_expanded, self.roots_of_unity_polynomial * (3 * self.fft_cofactor))
@@ -283,7 +282,7 @@ class Prover:
         #    L0 = Lagrange polynomial, equal at all roots of unity except 1
             
         # Quotient polynomial
-        self.QUOT_expanded = self.gate + self.accumulator
+        self.QUOT_expanded = self.gates + self.permutation_grand_product
         
         # Normalize the quotient polynomial back to coefficient form without offset
         self.QUOT_coefficients = self.expanded_evals_to_coeffs(self.QUOT_expanded)
@@ -322,7 +321,7 @@ class Prover:
         return Message3(t_lo_1, t_mid_1, t_hi_1)
 
     def round_4(self) -> Message4:
-        # Compute evaluations to be used in constructing the linearization polynomial.
+        # Compute opening evaluations to be used in constructing the linearization polynomial.
 
         # Compute a_eval = A(zeta)
         self.a_eval = self.A.barycentric_eval(self.zeta)
@@ -340,79 +339,165 @@ class Prover:
         self.s2_eval = self.pk.S2.barycentric_eval(self.zeta)
         
         # Compute z_shifted_eval = Z(zeta * ω)
-        self.z_shifted_eval = self.Z.barycentric_eval(self.zeta * primitive_root)
+        root_of_unity = Scalar.root_of_unity(self.group_order)
+        self.z_shifted_eval = self.Z.barycentric_eval(self.zeta * root_of_unity)
         
         print("Successfully completed round 4")
 
         # Return a_eval, b_eval, c_eval, s1_eval, s2_eval, z_shifted_eval
         return Message4(self.a_eval, self.b_eval, self.c_eval, self.s1_eval, self.s2_eval, self.z_shifted_eval)
 
-    # def round_5(self) -> Message5:
-    #     # Evaluate the Lagrange basis polynomial L0 at zeta
-    #     # Evaluate the vanishing polynomial Z_H(X) = X^n - 1 at zeta
+    def round_5(self) -> Message5:
+        # Evaluate the Lagrange basis polynomial L0 at zeta
+        self.L0_eval = self.L0.barycentric_eval(self.zeta)
+        
+        # Evaluate the vanishing polynomial Z_H(X) = X^n - 1 at zeta
+        self.Z_H_eval = self.zeta ** self.group_order - 1
+        
+        # Move T1, T2, T3 into the coset extended Lagrange basis
+        self.T1_expanded, self.T2_expanded, self.T3_expanded = (
+            self.fft_expand(x)
+            for x in (
+                self.T1,
+                self.T2,
+                self.T3,
+            )
+        )
+        
+        # Evaluate the Lagrange basis polynomial PI at zeta
+        self.PI_eval = self.PI.barycentric_eval(self.zeta)
+        c_eval = Polynomial([self.c_eval] * self.group_order * 4, Basis.LAGRANGE)
 
-    #     # Move T1, T2, T3 into the coset extended Lagrange basis
-    #     # Move pk.QL, pk.QR, pk.QM, pk.QO, pk.QC into the coset extended Lagrange basis
-    #     # Move Z into the coset extended Lagrange basis
-    #     # Move pk.S3 into the coset extended Lagrange basis
+        # Compute the "linearization polynomial" R. This is a clever way to avoid
+        # needing to provide evaluations of _all_ the polynomials that we are
+        # checking an equation betweeen: instead, we can "skip" the first
+        # multiplicand in each term. The idea is that we construct a
+        # polynomial which is constructed to equal 0 at Z only if the equations
+        # that we are checking are correct, and which the verifier can reconstruct
+        # the KZG commitment to, and we provide proofs to verify that it actually
+        # equals 0 at Z
+        #
+        # In order for the verifier to be able to reconstruct the commitment to R,
+        # it has to be "linear" in the proof items, hence why we can only use each
+        # proof item once; any further multiplicands in each term need to be
+        # replaced with their evaluations at Z, which do still need to be provided
 
-    #     # Compute the "linearization polynomial" R. This is a clever way to avoid
-    #     # needing to provide evaluations of _all_ the polynomials that we are
-    #     # checking an equation betweeen: instead, we can "skip" the first
-    #     # multiplicand in each term. The idea is that we construct a
-    #     # polynomial which is constructed to equal 0 at Z only if the equations
-    #     # that we are checking are correct, and which the verifier can reconstruct
-    #     # the KZG commitment to, and we provide proofs to verify that it actually
-    #     # equals 0 at Z
-    #     #
-    #     # In order for the verifier to be able to reconstruct the commitment to R,
-    #     # it has to be "linear" in the proof items, hence why we can only use each
-    #     # proof item once; any further multiplicands in each term need to be
-    #     # replaced with their evaluations at Z, which do still need to be provided
+        # Calculate the gate constraints
+        self.gates = (
+            self.QL_expanded * self.a_eval
+            + self.QR_expanded * self.b_eval
+            + self.QM_expanded * self.a_eval * self.b_eval
+            + self.QO_expanded * self.c_eval
+            + self.PI_eval
+            + self.QC_expanded
+        )   
+        
+        # Calculate the permutation grant product
+        self.permutation_grand_product = (
+            self.Z_expanded * (  
+                self.rlc(self.a_eval, self.zeta) 
+                * self.rlc(self.b_eval, 2 * self.zeta) 
+                * self.rlc(self.c_eval, 3 * self.zeta)
+            ) - (
+                self.rlc(c_eval, self.S3_expanded)
+                * self.rlc(self.a_eval, self.s1_eval)
+                * self.rlc(self.b_eval, self.s2_eval)
+            ) * 
+                self.z_shifted_eval
+        )
+        
+        # Calculate the first row of the permutation
+        self.permutation = (self.Z_expanded - Scalar(1)) * self.L0_eval
+        
+        # Calculate the quotient polynomial
+        self.T_argument = (
+            self.T1_expanded
+            + self.T2_expanded * (self.zeta ** self.group_order)
+            + self.T3_expanded * (self.zeta ** (2 * self.group_order))
+        )
+                
+        # Calculate the linearization polynomial
+        self.R_argument = (
+            self.gates 
+            + self.permutation_grand_product * self.alpha
+            + self.permutation * (self.alpha ** 2) 
+            - self.T_argument
+            * self.Z_H_eval
+        )
+        
+        # Normalize the linearization polynomial back to coefficient form
+        R_coeffs = self.expanded_evals_to_coeffs(self.R_argument).values
+        assert R_coeffs[self.group_order:] == [0] * (self.group_order * 3)
+        self.R = Polynomial(R_coeffs[:self.group_order], Basis.MONOMIAL).fft()
+                        
+        # Commit to R
+        self.R_commit = self.setup.commit(self.R)    
+        
+        # Sanity-check R
+        assert self.R.barycentric_eval(self.zeta) == 0
+        
+        print("Generated linearization polynomial R")
+        
+        # Generate opening proof polynomial W_Z that W(z) = 0 and that the provided evaluations of
+        # A, B, C, S1, S2 are correct
+        self.quarter_roots = Polynomial(self.roots_of_unity, Basis.LAGRANGE)
+        self.root_of_unity = Scalar.root_of_unity(self.group_order)
 
-    #     # Commit to R
+        # In the COSET EXTENDED LAGRANGE BASIS,
+        # Construct W_Z = (
+        #     R
+        #   + v * (A - a_eval)
+        #   + v**2 * (B - b_eval)
+        #   + v**3 * (C - c_eval)
+        #   + v**4 * (S1 - s1_eval)
+        #   + v**5 * (S2 - s2_eval)
+        # ) / (X - zeta)
+        # Each polynomial should have zeta as a root, so (X - zeta)
+        # should divide the whole sume evenly without remainder. 
+        self.W_Z_argument = (
+            self.R_argument
+            + (self.A_expanded - self.a_eval) * self.v
+            + (self.B_expanded - self.b_eval) * (self.v ** 2)
+            + (self.C_expanded - self.c_eval) * (self.v ** 3)
+            + (self.S1_expanded - self.s1_eval) * (self.v ** 4)
+            + (self.S2_expanded - self.s2_eval) * (self.v ** 5) 
+        ) / (self.quarter_roots * self.fft_cofactor - self.zeta)
+                
+        W_z_coeffs = self.expanded_evals_to_coeffs(self.W_Z_argument).values
+        assert W_z_coeffs[self.group_order:] == [0] * (self.group_order * 3)
+        self.W_z = Polynomial(W_z_coeffs[:self.group_order], Basis.MONOMIAL).fft()
+        
+        # Check that degree of W_z is not greater than n
+        assert W_z_coeffs[self.group_order:] == [0] * (self.group_order * 3)
+        
+        # Compute W_z_1 commitment to W_z
+        self.W_z_1 = self.setup.commit(self.W_z)    
+        
+        # Generate proof that the provided evaluation of Z(z*w) is correct. This
+        # awkwardly different term is needed because the permutation accumulator
+        # polynomial Z is the one place where we have to check between adjacent
+        # coordinates, and not just within one coordinate.
+        # In other words: Compute W_zw = (Z - z_shifted_eval) / (X - zeta * ω)
+        self.W_zw_argument = (
+            (self.Z_expanded - self.z_shifted_eval) / 
+            (self.quarter_roots * self.fft_cofactor - self.root_of_unity * self.zeta)
+        )
+        
+        W_zw_coeffs = self.expanded_evals_to_coeffs(self.W_zw_argument).values
+        assert W_zw_coeffs[self.group_order:] == [0] * (self.group_order * 3)
+        self.W_zw = Polynomial(W_zw_coeffs[:self.group_order], Basis.MONOMIAL).fft()
+        
+        # Check that degree of W_z is not greater than n
+        assert W_zw_coeffs[self.group_order:] == [0] * (self.group_order * 3)
+        
+        # Compute W_zw_1 commitment to W_zw
+        self.W_zw_1 = self.setup.commit(self.W_zw)
 
-    #     # Sanity-check R
-    #     assert R.barycentric_eval(zeta) == 0
+        print("Generated final quotient witness polynomials")
+        print("Successfully completed round 5")
 
-    #     print("Generated linearization polynomial R")
-
-    #     # Generate proof that W(z) = 0 and that the provided evaluations of
-    #     # A, B, C, S1, S2 are correct
-
-    #     # Move A, B, C into the coset extended Lagrange basis
-    #     # Move pk.S1, pk.S2 into the coset extended Lagrange basis
-
-    #     # In the COSET EXTENDED LAGRANGE BASIS,
-    #     # Construct W_Z = (
-    #     #     R
-    #     #   + v * (A - a_eval)
-    #     #   + v**2 * (B - b_eval)
-    #     #   + v**3 * (C - c_eval)
-    #     #   + v**4 * (S1 - s1_eval)
-    #     #   + v**5 * (S2 - s2_eval)
-    #     # ) / (X - zeta)
-
-    #     # Check that degree of W_z is not greater than n
-    #     assert W_z_coeffs[group_order:] == [0] * (group_order * 3)
-
-    #     # Compute W_z_1 commitment to W_z
-
-    #     # Generate proof that the provided evaluation of Z(z*w) is correct. This
-    #     # awkwardly different term is needed because the permutation accumulator
-    #     # polynomial Z is the one place where we have to check between adjacent
-    #     # coordinates, and not just within one coordinate.
-    #     # In other words: Compute W_zw = (Z - z_shifted_eval) / (X - zeta * ω)
-
-    #     # Check that degree of W_z is not greater than n
-    #     assert W_zw_coeffs[group_order:] == [0] * (group_order * 3)
-
-    #     # Compute W_z_1 commitment to W_z
-
-    #     print("Generated final quotient witness polynomials")
-
-    #     # Return W_z_1, W_zw_1
-    #     return Message5(W_z_1, W_zw_1)
+        # Return W_z_1, W_zw_1
+        return Message5(self.W_z_1, self.W_zw_1)
 
     def fft_expand(self, x: Polynomial):
         return x.to_coset_extended_lagrange(self.fft_cofactor)
