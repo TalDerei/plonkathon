@@ -17,7 +17,7 @@ def setup_test():
     setup = Setup.from_file("test/powersOfTau28_hez_final_11.ptau")
     dummy_values = Polynomial(list(map(Scalar, [1, 2, 3, 4, 5, 6, 7, 8])), Basis.LAGRANGE)
     program = Program(["c <== a * b"], 8)
-    commitment = setup.commit(dummy_values)
+    commitment = setup.commit(dummy_values)    
     
     assert commitment == G1Point(
         (
@@ -25,7 +25,7 @@ def setup_test():
             3125847109934958347271782137825877642397632921923926105820408033549219695465,
         )
     )
-    
+        
     vk = setup.verification_key(program.common_preprocessed_input())
     assert (
         vk.w
@@ -53,7 +53,6 @@ def basic_test():
     assert getattr(vk, "w") == int(their_output["w"])
     print("Basic test success")
     return setup
-
 
 # Equivalent to this zkrepl code:
 #
@@ -261,12 +260,13 @@ def poseidon_test(setup):
 if __name__ == "__main__":
     # Step 1: Pass setup test
     setup_test()
-    exit(0)
 
     setup = basic_test()
 
     # Step 2: Pass prover test using verifier we provide (DO NOT READ TEST VERIFIER CODE)
     prover_test_dummy_verifier(setup)
+    
+    exit(0)
 
     # Step 3: Pass verifier test using your own verifier
     with open("test/proof.pickle", "rb") as f:

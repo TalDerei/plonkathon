@@ -152,7 +152,10 @@ class Polynomial:
     # [offset, offset * q, offset * q**2 ... offset * q**(4n-1)] where q = w**(1/4)
     # This lets us work with higher-degree polynomials, and the offset lets us
     # avoid the 0/0 problem when computing a division (as long as the offset is
-    # chosen randomly)
+    # chosen randomly).
+    # Resulting Polynomial f(x) = a_0 + a_1*(q * x)^1 + a_2*(q * x)^2 +
+    # ... + a_(n - 1) * (q * x)^(n - 1) + [0 * x^n + ... + 0 * x^(3n - 1)],
+    # where q = offset
     def to_coset_extended_lagrange(self, offset):
         assert self.basis == Basis.LAGRANGE
         group_order = len(self.values)
